@@ -69,40 +69,88 @@ end
 free_cb = @cfunction(done_with_var, Nothing, (Ptr{UInt8},))
 
 function put_var(arr::Array{T,N}, name::AbstractString) where {T,N}
-    if !isbits(eltype(arr)) || (idl_type(arr) < 0)
-        error("IDL.put_var: only works with some vars containing bits types")
+    code = idl_type(T)
+    
+    if !isbitstype(T) || (code < 0)
+        error("IDL.put_var: Type $T not supported")
     end
+    
     dim = zeros(Int, IDL_MAX_ARRAY_DIM)
     dim[1:N] = [size(arr)...]
+    
     vptr = ccall((:IDL_ImportNamedArray, idlcall), Ptr{IDL_Variable},
     (Ptr{UInt8}, Cint, IDL_ARRAY_DIM, Cint, Ptr{UInt8}, IDL_ARRAY_FREE_CB , Ptr{Nothing}),
-    name, N, dim, idl_type(arr), pointer(arr), free_cb, C_NULL)
+    name, N, dim, code, pointer(arr), free_cb, C_NULL)
+    
     if vptr == C_NULL
         error("IDL.put_var: failed")
     end
-    var_refs[pointer(arr)] = (name, vptr, arr)
+
+    ptr_key = reinterpret(Ptr{UInt8}, pointer(arr))
+    var_refs[ptr_key] = (name, vptr, arr)
     return
 end
 
 function put_var(x, name::AbstractString)
-    # Sort of a HACK: import as one-element array and then truncate to scalar
-    # IDL_ImportArray(int n_dim, IDL_MEMINT dim[], int type,
-    #                 UCHAR *data, IDL_ARRAY_FREE_CB free_cb, Nothing *s)
-    if !isbits(x) || (idl_type(x) < 0)
+    if isa(x, AbstractString)
+        # IDL escapes single quotes by doubling them (' -> '')
+        safe_str = replace(x, "'" => "''")
+        execute("$name = '$safe_str'")
+        return
+
+    elseif isa(x, Complex)
+        re, im = real(x), imag(x)
+        if isa(x, ComplexF64)
+            execute("$name = dcomplex('$re', '$im')")
+        else
+            execute("$name = complex('$re', '$im')")
+        end
+        return
+
+    elseif isa(x, AbstractFloat)
+        if isa(x, Float64)
+            execute("$name = double('$x')")
+        else
+            execute("$name = float('$x')")
+        end
+        return
+
+    elseif isa(x, Integer)
+        if isa(x, UInt8)
+            execute("$name = byte($x)")
+        elseif isa(x, Int16)
+            execute("$name = fix($x)")
+        elseif isa(x, UInt16)
+            execute("$name = uint($x)")
+        elseif isa(x, Int32)
+            execute("$name = long($x)")
+        elseif isa(x, UInt32)
+            execute("$name = ulong($x)")
+        elseif isa(x, Int64)
+            execute("$name = long64($x)")
+        elseif isa(x, UInt64)
+            execute("$name = ulong64($x)")
+        else
+            execute("$name = $x")
+        end
+        return
+    end
+
+    # Fallback for weird types
+    if !isbitstype(typeof(x)) || (idl_type(x) < 0)
         error("IDL.put_var: only works with some vars containing bits types")
     end
+    
     dim = zeros(Int, IDL_MAX_ARRAY_DIM)
     dim[1] = 1
+    arr = [x]
+    ptr_key = reinterpret(Ptr{UInt8}, pointer(arr))
+
     ccall((:IDL_ImportNamedArray, idlcall), Ptr{Nothing},
     (Ptr{UInt8}, Cint, Ptr{IDL_MEMINT}, Cint, Ptr{UInt8}, Ptr{Nothing}, Ptr{Nothing}),
-    name, 1, dim, idl_type(x), pointer([x]), C_NULL, C_NULL)
+    name, 1, dim, idl_type(x), pointer(arr), C_NULL, C_NULL)
+    
     execute("$name = $name[0]")
-    return
-end
-
-function put_var(str::AbstractString, name::AbstractString)
-    # Sort of a HACK: do direcly since ImportNamedArray doesn't work
-    execute("$name = '$str'")
     return
 end
 

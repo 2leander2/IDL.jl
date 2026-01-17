@@ -1,11 +1,15 @@
 name = "IDL"
 uuid = "d8fbff9c-ffdd-4f12-b08d-aa41cc43ce74"
-authors = ["Bob Portmann", "Hongyang Zhou <hyzhou@umich.edu>"]
 version = "0.1.0"
+authors = ["Bob Portmann", "Hongyang Zhou <hyzhou@umich.edu>"]
 
 [deps]
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
+[compat]
+Random = "1.11.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

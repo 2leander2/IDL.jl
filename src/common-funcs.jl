@@ -43,38 +43,41 @@ end
 
 function put_var(arr::Array{T,N}, name::AbstractString) where {T<:AbstractString,N}
     # Sort of a HACK: do direcly since ImportNamedArray doesn't work
-    execute("$name = strarr"*replace(string(size(arr)), ",)", ")"))
+    
+    dims_str = replace(string(size(arr)), ",)" => ")")
+    execute("$name = strarr$dims_str")
+    
     for i=1:length(arr)
         j = i-1
-        str = arr[i]
-        execute("$name[$j] = '$str'")
+        safe_str = replace(arr[i], "'" => "''")
+        execute("$name[$j] = '$safe_str'")
     end
     return
 end
 
-const mask64 = 0x0000000000000000ffffffffffffffff
-const mask32 = 0x000000000000000000000000ffffffff
+const mask32 = 0x00000000ffffffff
 
 function get_var(vptr::Ptr{IDL_Variable}, name::AbstractString="")
     var = unsafe_load(vptr)
-    # some types not dealt with
     if (var.flags & IDL_V_FILE) != 0
         error("IDL.extract_from_vptr: $name: assoc type not setup")
     end
-    ## if (var.flags & IDL_V_DYNAMIC) != 0
-    ##     println("dynamic")
-    ## end
     if (var.flags & IDL_V_NULL) != 0
         error("IDL.extract_from_vptr: $name: variable is null")
     end
 
-    # array types
+    # Helper to get the pointer address (stored in the low 64 bits)
+    get_ptr(v) = convert(Int, v.buf[1])
+
+    # ARRAY TYPES
     if (var.flags & IDL_V_ARR) != 0
         if var.vtype == IDL_TYP_STRING
-            parr = reinterpret(Ptr{IDL_Array}, convert(Int, var.buf))
+            parr = reinterpret(Ptr{IDL_Array}, get_ptr(var))
             idl_arr = unsafe_load(parr)
             pdata = reinterpret(Ptr{IDL_String}, idl_arr.data)
-            strarr = Array{AbstractString}(dims(idl_arr.dim, idl_arr.n_dim))
+            
+            strarr = Array{String}(undef, dims(idl_arr.dim, idl_arr.n_dim))
+            
             for i = 1:idl_arr.n_elts
                 data = unsafe_load(pdata, i)
                 strarr[i] = data.slen > 0 ? unsafe_string(data.s, Int(data.slen)) : ""
@@ -87,64 +90,55 @@ function get_var(vptr::Ptr{IDL_Variable}, name::AbstractString="")
         elseif var.vtype == IDL_TYP_OBJREF
             error("IDL.extract_from_vptr: $name: OBJARR types not setup")
         else
-            parr = reinterpret(Ptr{IDL_Array}, convert(Int, var.buf))
+            parr = reinterpret(Ptr{IDL_Array}, get_ptr(var))
             idl_arr = unsafe_load(parr)
             jl_t = jl_type(var.vtype)
             pdata = reinterpret(Ptr{jl_t}, idl_arr.data)
             arr = unsafe_wrap(Array, pdata, dims(idl_arr.dim, idl_arr.n_dim))
-            #=
-            arr = Array{jl_t}(undef, dims(idl_arr.dim, idl_arr.n_dim))
-            for i = 1:idl_arr.n_elts
-            arr[i] = unsafe_load(pdata, i)
+            return copy(arr)
         end
-        =#
-        # If you don't copy, the pointer will be freed!
-        return copy(arr)
     end
-end
 
-# Scalar value
-if var.vtype == IDL_TYP_UNDEF
-    error("IDL.extract_from_vptr: $name: undefined variable")
-elseif var.vtype == IDL_TYP_BYTE
-    return reinterpret(Int8, convert(UInt8, var.buf))
-elseif var.vtype == IDL_TYP_INT
-    return reinterpret(Int16, convert(UInt16, var.buf))
-elseif var.vtype == IDL_TYP_LONG
-    return reinterpret(Int32, convert(UInt32, var.buf))
-elseif var.vtype == IDL_TYP_FLOAT
-    return reinterpret(Float32, convert(UInt32, var.buf))
-elseif var.vtype == IDL_TYP_DOUBLE
-    return reinterpret(Float64, convert(UInt64, var.buf))
-elseif var.vtype == IDL_TYP_COMPLEX
-    return complex(reinterpret(Float32, convert(UInt32, var.buf & mask32)),
-    reinterpret(Float32, convert(UInt32, var.buf >> 32)))
-elseif var.vtype == IDL_TYP_STRING
-    slen = reinterpret(Int32, convert(UInt32,var.buf & mask32))
-    stype = reinterpret(Int32, convert(UInt32,(var.buf & mask64) >> 32))
-    println(stype)
-    s = reinterpret(Ptr{Cchar}, convert(UInt64,var.buf >> 64))
-    return slen > 0 ? unsafe_string(s, slen) : ""
-elseif var.vtype == IDL_TYP_STRUCT
-    error("IDL.extract_from_vptr: $name: STRUCT not setup")
-elseif var.vtype == IDL_TYP_DCOMPLEX
-    return complex(reinterpret(Float64, convert(UInt64, var.buf & mask64)),
-    reinterpret(Float64, convert(UInt64, var.buf >> 64)))
-elseif var.vtype == IDL_TYP_PTR
-    error("IDL.extract_from_vptr: $name: PTR not setup")
-elseif var.vtype == IDL_TYP_OBJREF
-    error("IDL.extract_from_vptr: $name: OBJREF not setup")
-elseif var.vtype == IDL_TYP_UINT
-    return reinterpret(UInt16, convert(UInt16, var.buf))
-elseif var.vtype == IDL_TYP_ULONG
-    return reinterpret(UInt32, convert(UInt32, var.buf))
-elseif var.vtype == IDL_TYP_LONG64
-    return reinterpret(Int64, convert(UInt64, var.buf))
-elseif var.vtype == IDL_TYP_ULONG64
-    return reinterpret(UInt64, convert(UInt64, var.buf))
-end
-# should be impossible to get here
-error("IDL.extract_from_vptr: $name: type is not setup")
+    # SCALAR VALUES (reading from var.buf[1] or var.buf[2])
+    if var.vtype == IDL_TYP_UNDEF
+        error("IDL.extract_from_vptr: $name: undefined variable")
+    elseif var.vtype == IDL_TYP_BYTE
+        return convert(UInt8, var.buf[1] & 0xff)
+    elseif var.vtype == IDL_TYP_INT
+        return reinterpret(Int16, convert(UInt16, var.buf[1] & 0xffff))
+    elseif var.vtype == IDL_TYP_LONG
+        return reinterpret(Int32, convert(UInt32, var.buf[1] & mask32))
+    elseif var.vtype == IDL_TYP_FLOAT
+        return reinterpret(Float32, convert(UInt32, var.buf[1] & mask32))
+    elseif var.vtype == IDL_TYP_DOUBLE
+        return reinterpret(Float64, var.buf[1])
+    elseif var.vtype == IDL_TYP_COMPLEX
+        return complex(reinterpret(Float32, convert(UInt32, var.buf[1] & mask32)),
+                       reinterpret(Float32, convert(UInt32, var.buf[1] >> 32)))
+    elseif var.vtype == IDL_TYP_STRING
+        # String struct: len (low 32 of buf[1]), pointer (buf[2])
+        slen = convert(Int32, var.buf[1] & mask32)
+        s = reinterpret(Ptr{Cchar}, convert(UInt64, var.buf[2]))
+        return slen > 0 ? unsafe_string(s, slen) : ""
+    elseif var.vtype == IDL_TYP_STRUCT
+        error("IDL.extract_from_vptr: $name: STRUCT not setup")
+    elseif var.vtype == IDL_TYP_DCOMPLEX
+        return complex(reinterpret(Float64, var.buf[1]),
+                       reinterpret(Float64, var.buf[2]))
+    elseif var.vtype == IDL_TYP_PTR
+        error("IDL.extract_from_vptr: $name: PTR not setup")
+    elseif var.vtype == IDL_TYP_OBJREF
+        error("IDL.extract_from_vptr: $name: OBJREF not setup")
+    elseif var.vtype == IDL_TYP_UINT
+        return reinterpret(UInt16, convert(UInt16, var.buf[1] & 0xffff))
+    elseif var.vtype == IDL_TYP_ULONG
+        return reinterpret(UInt32, convert(UInt32, var.buf[1] & mask32))
+    elseif var.vtype == IDL_TYP_LONG64
+        return reinterpret(Int64, var.buf[1])
+    elseif var.vtype == IDL_TYP_ULONG64
+        return var.buf[1]
+    end
+    error("IDL.extract_from_vptr: $name: type is not setup")
 end
 
 function inside_string(pt::Int, line::AbstractString)

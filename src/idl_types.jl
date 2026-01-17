@@ -44,11 +44,12 @@ const IDL_V_STRUCT =      32
 const IDL_V_NULL =        64
 
 function idl_type(jl_t)
-    # IDL type index from julia type
-    t = typeof(jl_t)
+    t = (jl_t isa DataType) ? jl_t : typeof(jl_t)
+
     if t <: AbstractArray
-        t = eltype(jl_t)
+        t = eltype(t)
     end
+    
     idl_t = -1
     if t == UInt8
         idl_t = IDL_TYP_BYTE
@@ -60,9 +61,13 @@ function idl_type(jl_t)
         idl_t = IDL_TYP_FLOAT
     elseif t == Float64
         idl_t = IDL_TYP_DOUBLE
-    elseif t == ComplexF64
+    
+    elseif t == ComplexF32
         idl_t = IDL_TYP_COMPLEX
-    elseif t <: AbstractString
+    elseif t == ComplexF64
+        idl_t = IDL_TYP_DCOMPLEX
+
+    elseif t <: AbstractString || t == String
         idl_t = IDL_TYP_STRING
     elseif t == UInt16
         idl_t = IDL_TYP_UINT
@@ -73,7 +78,11 @@ function idl_type(jl_t)
     elseif t == UInt64
         idl_t = IDL_TYP_ULONG64
     end
-    if idl_t < 0 error("IDL.idl_type: type not found: " * string(t)) end
+    
+    if idl_t < 0 
+        println("IDL.jl Warning: idl_type could not resolve type: $t")
+    end
+    
     return idl_t
 end
 
@@ -91,11 +100,11 @@ function jl_type(idl_t)
     elseif idl_t == IDL_TYP_DOUBLE
         jl_t = Float64
     elseif idl_t == IDL_TYP_COMPLEX
-        jl_t = ComplexF64
+        jl_t = ComplexF32
     elseif idl_t == IDL_TYP_STRING
-        jl_t = Compat.String
-        #elseif idl_t == IDL_TYP_DCOMPLEX
-        #    jl_t = Complex128
+        jl_t = String
+    elseif idl_t == IDL_TYP_DCOMPLEX
+        jl_t = ComplexF64
     elseif idl_t == IDL_TYP_UINT
         jl_t = UInt16
     elseif idl_t == IDL_TYP_ULONG
@@ -114,11 +123,10 @@ end
 #*************************************************************************************************#
 # some IDL types from extern.jl
 # sizeof(buf) is max size of IDL_ALLTYPES Union (64x2=128 bits or 16 bytes on all platforms)
-const IDL_ALLTYPES = UInt128
+const IDL_ALLTYPES = NTuple{2, UInt64}
 struct IDL_Variable
     vtype::UCHAR
     flags::UCHAR
-    flags2::UCHAR
     buf::IDL_ALLTYPES
 end
 
