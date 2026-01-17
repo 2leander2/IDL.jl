@@ -15,7 +15,7 @@ if Sys.isunix()
     const idlrpc = joinpath(idl_dir,"idlrpc")
     const idlcall = joinpath(idl_lib_dir,"libidl.dylib")
 else # Windows
-    const idlcall = "libidl"
+    const idlcall = "idl"
     const idlrpc = "libidl_rpc"
 end
 

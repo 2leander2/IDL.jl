@@ -10,11 +10,20 @@ if Sys.isapple()
     end
 end
 
+function get_output(flags::Cint, buf::Ptr{UInt8}, n::Cint)
+    line = unsafe_string(buf, n)
+    stderr = (flags & IDL_TOUT_F_STDERR) != 0
+    newline = (flags & IDL_TOUT_F_NLPOST) != 0
+    if newline line = line*"\n" end
+    print(line)
+    return
+end
+
 function callable_init()
     ecode = ccall((:IDL_Initialize, idlcall), Cint,
         (Cint, Ptr{Cint}, Ptr{Ptr{UInt8}}), 0, C_NULL, C_NULL)
     ecode == 0 && error("IDL.init: IDL init failed")
-    global output_cb
+    global output_cb = @cfunction(get_output, Nothing, (Cint, Ptr{UInt8}, Cint))
     ccall((:IDL_ToutPush, idlcall), Nothing, (Ptr{Nothing},), output_cb)
 end
 
@@ -38,17 +47,6 @@ function execute_converted(str::AbstractString)
     end
     return true
 end
-
-function get_output(flags::Cint, buf::Ptr{UInt8}, n::Cint)
-    line = unsafe_string(buf, n)
-    stderr = (flags & IDL_TOUT_F_STDERR) != 0
-    newline = (flags & IDL_TOUT_F_NLPOST) != 0
-    if newline line = line*"\n" end
-    print(line)
-    return
-end
-
-output_cb = @cfunction(get_output, Nothing, (Cint, Ptr{UInt8},Cint))
 
 # function exit()
 #     # probably better to do a .full_reset instead
