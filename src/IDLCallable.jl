@@ -25,6 +25,7 @@ function callable_init()
     ecode == 0 && error("IDL.init: IDL init failed")
     global output_cb = @cfunction(get_output, Nothing, (Cint, Ptr{UInt8}, Cint))
     ccall((:IDL_ToutPush, idlcall), Nothing, (Ptr{Nothing},), output_cb)
+    ccall((:IDL_ExecuteStr, idlcall), Cint, (Ptr{UInt8},), "!EXCEPT=0")
 end
 
 # function execute{T<:AbstractString}(strarr::Array{T,1})
